@@ -3,11 +3,11 @@
 export TARGET=logistic
 PWD=${CURDIR}
 
-compile_arm:
-	make -C arm
+compile_service:
+	make -C ../accService/arm
 
 compile_fpga:
-	make -C fpga
+	make -C ../accKernel/${TARGET}
 
 setup:
 	for id in 4 5 ; do \
@@ -20,5 +20,5 @@ setup:
 start:
 	for id in 4 5 ; do \
 		ssh computer$$id 'ssh root@fpga "cd /mnt/acc; sh stop.sh accService"'; \
-		ssh computer$$id 'ssh root@fpga "cd /mnt/acc; sh start.sh accService"' & \
+		ssh computer$$id 'ssh root@fpga "cd /mnt/acc; sh start.sh accService"'& \
 	done
