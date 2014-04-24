@@ -30,10 +30,10 @@ import java.util.regex.Pattern;
  */
 public final class PartitionLR {
 
-  //private static final int D = 10;   // Number of dimensions
-  //private static final int L = 2;   // Number of labels
-  private static final int D = 784;   // Number of dimensions
-  private static final int L = 10;   // Number of labels
+  private static final int D = 10;   // Number of dimensions
+  private static final int L = 1;   // Number of labels
+  //private static final int D = 784;   // Number of dimensions
+  //private static final int L = 10;   // Number of labels
   private static final Random rand = new Random(42);
 
   static class DataPoint implements Serializable {
@@ -74,6 +74,44 @@ public final class PartitionLR {
           }
       }
       return result;
+    }
+  }
+
+  static class TestPrediction extends FlatMapFunction<Iterator<DataPoint>, Integer> {
+    private final float[][] weights;
+
+    TestPrediction(float[][] weights) {
+        this.weights = weights;
+    }
+
+    @Override
+    public Iterable<Integer> call(Iterator<DataPoint> p_iter) {
+        List<Integer> result = new ArrayList<Integer>();
+        int prediction = 0;
+        while(p_iter.hasNext())
+        {
+            DataPoint p = p_iter.next();
+            float max_possibility = Float.MIN_VALUE;
+            int likely_class = 0;
+            for(int i = 0; i < L; i++) {
+                float dot = dot(weights[i], p.x);
+                if(dot > max_possibility)
+                {
+                    max_possibility = dot;
+                    likely_class = i;
+                }
+            }
+            if( L <= 1 )
+            {
+                prediction += p.y[0] > 0 ?  ( max_possibility > 0 ? 1 : 0 ) : ( max_possibility < 0 ? 1 : 0 );
+            }
+            else
+            {
+                prediction += ( p.y[likely_class] > 0 ? 1 : 0 );
+            }
+        }
+        result.add(prediction);
+        return result;
     }
   }
 
@@ -120,7 +158,7 @@ public final class PartitionLR {
   public static void main(String[] args) {
 
     if (args.length < 3) {
-      System.err.println("Usage: JavaHdfsLR <master> <file> <iters>");
+      System.err.println("Usage: JavaHdfsLR <master> <file> <iters> (<testing file>)");
       System.exit(1);
     }
 
@@ -159,6 +197,17 @@ public final class PartitionLR {
 
     System.out.print("Final w: ");
     printWeights(w);
+
+    lines = sc.textFile( args.length < 4 ? args[1] : args[3] );
+    points = lines.map(new ParsePoint());
+    float error_rate = points.mapPartitions( new TestPrediction(w) ).reduce( new Function2<Integer, Integer, Integer>() {
+      @Override
+      public Integer call(Integer integer, Integer integer2) {
+        return integer + integer2;
+      }
+    }) / (float)( points.count() );
+    System.out.println("error rate: "+(error_rate*100)+"%");
+
     System.exit(0);
   }
 }
