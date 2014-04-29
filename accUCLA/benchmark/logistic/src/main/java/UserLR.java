@@ -21,6 +21,7 @@ import org.apache.spark.api.java.function.Function;
 import org.apache.spark.api.java.function.Function2;
 import org.apache.spark.api.java.function.FlatMapFunction;
 
+import java.lang.InterruptedException;
 import java.io.IOException;
 import java.io.Serializable;
 import java.io.PrintWriter;
@@ -89,7 +90,7 @@ public final class UserLR {
     }
 
     @Override
-    public Iterable<Float[][]> call(Iterator<DataPoint> p_iter) throws IOException{
+    public Iterable<Float[][]> call(Iterator<DataPoint> p_iter) throws IOException, InterruptedException{
       
       int partition_size = 0;
       List<Float> data = new ArrayList<Float>();

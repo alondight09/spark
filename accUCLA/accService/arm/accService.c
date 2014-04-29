@@ -333,12 +333,16 @@ int main(int argc, char** argv) {
 #if SOCKET
         nbyte = recv(connfd, weights, L*D*sizeof(float), MSG_WAITALL);
         printf("received weights for %d bytes\n", nbyte);
+#if SHOW_DATA
         printf("the first 10 elements are:\n");
         for( i = 0; i < 10; i++ ) printf("%f\n", weights[i]);
+#endif
         nbyte = recv(connfd, data, n*(D+L)*sizeof(float), MSG_WAITALL);
         printf("received training data for %d bytes\n", nbyte);
+#if SHOW_DATA
         printf("the first 10 elements are:\n");
         for( i = 0; i < 10; i++ ) printf("%f\n", data[i]);
+#endif
 #else
         for( i = 0; i < D; i++ ) weights[i]=0.;
         FILE* pFile = fopen("lr_simple.txt","r");
@@ -346,6 +350,7 @@ int main(int argc, char** argv) {
         fclose(pFile);
 #endif
         
+        printf("fpga computation...\n");
         //computeGradient(weights,data,gradient,L,D,n);
         computeGradientByFPGA(weights,data,gradient,L,D,n,clPackage);
 
