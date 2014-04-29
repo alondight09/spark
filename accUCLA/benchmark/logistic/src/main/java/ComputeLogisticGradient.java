@@ -23,9 +23,9 @@ public class ComputeLogisticGradient{
         conn_manager.buildConnection( );
         conn_manager.send(request,2);
         int[] response = conn_manager.receive_int(3);
+        conn_manager.closeConnection( );
         if(response[1]==1) break;
         Thread.sleep(response[2]*1000);
-        conn_manager.closeConnection( );
       }
   }
 
