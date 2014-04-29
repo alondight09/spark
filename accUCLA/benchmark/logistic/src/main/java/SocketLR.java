@@ -43,10 +43,10 @@ import java.net.ServerSocket;
  */
 public final class SocketLR {
 
-  //private static final int D = 10;   // Number of dimensions
-  //private static final int L = 1;   // Number of labels
-  private static final int D = 784;   // Number of dimensions
-  private static final int L = 10;   // Number of labels
+  private static final int D = 10;   // Number of dimensions
+  private static final int L = 1;   // Number of labels
+  //private static final int D = 784;   // Number of dimensions
+  //private static final int L = 10;   // Number of labels
   private static final Random rand = new Random(42);
 
   static class DataPoint implements Serializable {
