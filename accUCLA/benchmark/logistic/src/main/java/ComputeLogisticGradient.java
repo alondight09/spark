@@ -6,11 +6,16 @@ import java.lang.InterruptedException;
 import java.io.PrintWriter;
 
 public class ComputeLogisticGradient{
+
+    private static final Boolean use_acc_manager = false;
+
     public static Float[][] run(int partition_size, int L, int D, Float[][] weights, Float[] data) throws IOException, InterruptedException
     {
       //debug
       PrintWriter writer = new PrintWriter("/tmp/partition_log.txt");
 
+  if( use_acc_manager )
+  {
       Connector2FPGA conn_manager = new Connector2FPGA("farmer.cs.ucla.edu", 9989);
       while(true)
       {
@@ -22,6 +27,7 @@ public class ComputeLogisticGradient{
         Thread.sleep(response[2]*1000);
         conn_manager.closeConnection( );
       }
+  }
 
       writer.println("Start call ");
       //Iterator<DataPoint> p_start = p_iter;
@@ -50,10 +56,13 @@ public class ComputeLogisticGradient{
       Float[][] result = conn.receive_float(L,D);
       conn.closeConnection();
 
+  if( use_acc_manager )
+  {
       Connector2FPGA conn_manager2 = new Connector2FPGA("farmer.cs.ucla.edu", 9990);
       conn_manager2.buildConnection( );
       conn_manager2.send(1);
       conn_manager2.closeConnection( );
+  }
       return result;
     }
 }
