@@ -53,7 +53,6 @@ AccManager::AccManager() {
 		//FPGA * f = new FPGA(i, FPGA_IDLE, ip_prefix + ip_surfix);
 		FPGA * f = new FPGA(i, FPGA_IDLE);
 		this->add_fpga(f);
-		f->set_status(FPGA_IDLE);
 	}
 	for(int i = 0; i < NOF_FPGA; i++) {
 		string ip_prefix = "10.0.0.";
@@ -81,11 +80,9 @@ void AccManager::init_socket() {
 	//	listen_to_port(socketfd_scheduler, PORT_TO_SCHEDULER);
 	listen_to_port(sockfd_acc_rqst, PORT_TO_ACC_RQST);
 	listen_to_port(sockfd_acc_done, PORT_TO_ACC_DONE);
-	//	connect_to_slave(sockfd_slave);
 }
 
 void AccManager::listen_to_port(int & sockfd, int port) {
-	//int err = 0;
 	sockfd = 0;
 	socklen_t buf_size = 0;
 	socklen_t size = sizeof(buf_size);
@@ -102,8 +99,6 @@ void AccManager::listen_to_port(int & sockfd, int port) {
 	int flags = fcntl(sockfd, F_GETFL);
 	flags |= O_NONBLOCK;
 	fcntl(sockfd, F_SETFL, flags);
-
-	//err = getsockopt(listenfd, SOL_SOCKET, SO_SNDBUF, &buf_size, &size);
 
 	bzero((char*) &serv_addr, sizeof(serv_addr));
 
@@ -139,7 +134,7 @@ void AccManager::listen_to_port(int & sockfd, int port) {
 	 }
 	 }
 	 */
-void add_to_acc_rqst_list( map<int, list<AccRqst> > & acc_rqst_list, AccRqst ar) {
+void AccManager::add_to_acc_rqst_list(AccRqst ar) {
 	int priority = ar.arp.task_priority;
 	map<int, list<AccRqst> >::iterator it = acc_rqst_list.find(priority);
 	if (it != acc_rqst_list.end()) {
@@ -158,7 +153,7 @@ void AccManager::run() {
 
 	while(1) {
 
-		map<int, list<AccRqst> > acc_rqst_list;
+		acc_rqst_list.clear();
 
 		// step 0: retrieve all udp packets from spark map tasks
 		while(1) {
@@ -179,14 +174,16 @@ void AccManager::run() {
 				ar.sockfd = newsockfd;
 				ar.addr = clnt_addr;
 				
-				add_to_acc_rqst_list(acc_rqst_list, ar);
+				add_to_acc_rqst_list(ar);
 			}
 		}
 
+#if SLOW
 		cout << "--Acc_Request--" << endl;
+#endif
 		for(map<int, list<AccRqst> >::reverse_iterator it = acc_rqst_list.rbegin();
 				it != acc_rqst_list.rend(); it++) {
-			cout << "  priority: " << it->first << endl;
+			cout << "request  priority: " << it->first << endl;
 			list<AccRqst> list_ar = it->second;
 			for(list<AccRqst>::iterator lar_it = list_ar.begin();
 					lar_it!= list_ar.end(); lar_it++) {
@@ -194,13 +191,15 @@ void AccManager::run() {
 				cout << endl;
 			}
 		}
+#if SLOW
 		cout << "--EOF Acc_Request--" << endl << endl;
 
 		// step 1: process all received packets
 		cout << "--Acc_Response--" << endl;
+#endif
 		for(map<int, list<AccRqst> >::reverse_iterator it = acc_rqst_list.rbegin();
 				it != acc_rqst_list.rend(); it++) {
-			cout << "  priority: " << it->first << endl;
+			cout << "response  priority: " << it->first << endl;
 			list<AccRqst> list_ar = it->second;
 			for(list<AccRqst>::iterator lar_it = list_ar.begin();
 					lar_it!= list_ar.end(); lar_it++) {
@@ -220,7 +219,7 @@ void AccManager::run() {
 				cout << "; ip: " << cpu_ip;
 
 				if (cpu_ip_to_fpga_id.find(cpu_ip) == cpu_ip_to_fpga_id.end()) {
-					cout << "ERROR: cannot find FPGAs attached to this cpu" << endl;
+					cout << "\nERROR: cannot find FPGAs attached to this cpu ip" << endl;
 				} else {
 					int fpga_id = cpu_ip_to_fpga_id[cpu_ip];
 					FPGA* fpga = get_fpga_from_id(fpga_id);
@@ -233,6 +232,7 @@ void AccManager::run() {
 
 						new_acc->set_status(ACC_BUSY);
 						fpga->set_status(FPGA_HAS_BIT);
+
 						arpn.use_acc = 1;
 						arpn.wait_time = 0; 
 
@@ -257,8 +257,7 @@ void AccManager::run() {
 
 							arpn.use_acc = 1;
 							arpn.wait_time = 0; 
-						} else if ( fpga->get_status() == FPGA_HAS_BIT &&
-								cur_acc->get_status() == ACC_BUSY) {
+						} else if (cur_acc->get_status() == ACC_BUSY) {
 							arpn.use_acc = 0;
 							arpn.wait_time = ACC_EXE_TIME;
 						} else {
@@ -273,10 +272,12 @@ void AccManager::run() {
 				cout << "; use_acc: " << arpn.use_acc << "; wait_time: " << arpn.wait_time << endl;
 			}
 		}
+#if SLOW
 		cout << "--EOF Acc_Response--" << endl << endl;
 
 		// step 2: process acc done packets
 		cout << "--Mark_Acc_Done--" << endl;
+#endif
 		while(1) {
 			struct sockaddr_in clnt_addr;
 			socklen_t clilen = sizeof(clnt_addr); 
@@ -294,10 +295,12 @@ void AccManager::run() {
 				process_acc_done(adp);	
 			}
 		}
+#if SLOW
 		cout << "--EOF Mark_Acc_Done--" << endl << endl;
 
 		cout << "--WAIT 5 Seconds--" << endl << endl;;
 		sleep(5);
+#endif
 	}
 }
 

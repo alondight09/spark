@@ -50,6 +50,7 @@ class AccManager {
 
 	
 		FPGA* find_idle_fpga_from_list();
+		void add_to_acc_rqst_list(AccRqst ar);
 		void send_acc_request_response(AccRqst ar, AccRspns arpn);
 		void process_acc_done(AccDonePckt adp);
 
@@ -58,7 +59,8 @@ class AccManager {
 		list<FPGA*> m_fpga_list;
 		map<int, FPGA*> m_id_2_fpga;
 		map<string, int> cpu_ip_to_fpga_id;
-		//map<int, Accelerator*> m_id_2_acc;
+
+		map<int, list<AccRqst> > acc_rqst_list;
 
 		int sockfd_scheduler;
 		int sockfd_acc_rqst;
@@ -67,8 +69,6 @@ class AccManager {
 		int connected_sockfd[NOF_SLAVE];
 
 		void listen_to_port(int & sockfd, int port);
-//		void connect_to_slave(int & sockfd);
-
 	
 };
 #endif
