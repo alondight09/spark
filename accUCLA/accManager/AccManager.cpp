@@ -211,8 +211,8 @@ void AccManager::run() {
 				AccRspns arpn;
 				arpn.acc_type = ar.arp.acc_type;
 				// default value
-				arpn.use_acc = 0;
-				arpn.wait_time = -1;
+				arpn.use_acc = 2;
+				arpn.wait_time = 0;
 
 				// find its local fpga
 				string cpu_ip = get_string_ip((struct inaddr *)&ar.addr.sin_addr);
@@ -258,8 +258,9 @@ void AccManager::run() {
 							arpn.use_acc = 1;
 							arpn.wait_time = 0; 
 						} else if (cur_acc->get_status() == ACC_BUSY) {
-							arpn.use_acc = 0;
-							arpn.wait_time = ACC_EXE_TIME;
+							arpn.use_acc = 2;
+							//arpn.wait_time = ACC_EXE_TIME;
+							arpn.wait_time = 0;
 						} else {
 							cout << "ERROR: unknow status" << endl;
 						}
