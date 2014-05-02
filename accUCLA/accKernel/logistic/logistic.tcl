@@ -61,7 +61,7 @@ add_kernel_src -id ${TOP} -filename "${TOP}.cl"
 create_xclbin ${TOP}_lpp
 
 # Select the execution target of the kernel
-map_add_kernel_instance -N 1 -xclbin ${TOP}_lpp -id ${TOP} -target fpga0:OCL_REGION_0
+map_add_kernel_instance -N 8 -xclbin ${TOP}_lpp -id ${TOP} -target fpga0:OCL_REGION_0
 
 # Compile the host code
 compile_host -arch arm -cflags "-g -Wall -D FPGA_DEVICE"

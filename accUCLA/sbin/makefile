@@ -1,5 +1,3 @@
-#!/bin/sh
-
 export TARGET=logistic
 PWD=${CURDIR}
 namenode_dir=${HADOOP_HOME}/hdfs_data/namenode
@@ -13,10 +11,16 @@ computer3
 data_list= \
 ../benchmark/logistic/data
 
-compile_service:
+HOSTS=hostlist
+host_list=$(shell cat $(HOSTS))
+
+accService=../accService/arm/accService_host/pkg/arm/zc706/bin/accService_host.exe 
+accKernel=../accKernel/${TARGET}/${TARGET}_lpp/pkg/arm/zc706/bin/${TARGET}_lpp.xclbin
+
+$(accService):
 	make -C ../accService/arm
 
-compile_fpga:
+$(accKernel):
 	make -C ../accKernel/${TARGET}
 
 setup:
@@ -31,6 +35,11 @@ start:
 	for slave in ${slave_list}; do \
 		ssh $$slave 'ssh root@fpga "cd /mnt/acc; sh stop.sh accService"'; \
 		ssh $$slave 'ssh root@fpga "cd /mnt/acc; sh start.sh accService"'& \
+	done
+
+stop:
+	for slave in ${slave_list}; do \
+		ssh $$slave 'ssh root@fpga "cd /mnt/acc; sh stop.sh accService"'; \
 	done
 
 init:

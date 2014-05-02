@@ -1,42 +1,59 @@
+#define LABEL_SIZE		10
+#define FEATURE_SIZE	784
 
-__kernel __attribute__ ((reqd_work_group_size(1, 1, 1)))
+__kernel //__attribute__ ((reqd_work_group_size(1, 1, 1)))
 void logistic(
 	int	L,
 	int	D,
+	int n, 
 	__global float* global_weights,                        
-        __global float* global_data,                        
-        __global float* global_gradient)                        
+    __global float* global_data,                        
+    __global float* global_gradient)                        
 {                                                   
                                                     
-	//int gid = get_group_id(0);                      
+	int gid = get_group_id(0);                      
+	int gnum = get_num_groups(0);                      
 
-	__local float weights[8192];
-	__local float data[1024];
-	__local float gradient[8192];
+	__local float data[FEATURE_SIZE+LABEL_SIZE];
 
-	int i, j;
+	__local float weights[LABEL_SIZE*FEATURE_SIZE];
+	__local float gradient[LABEL_SIZE*FEATURE_SIZE];
 
-	event_t e_memcpy[3];
-	e_memcpy[0] = async_work_group_copy(weights, global_weights, (size_t)(D*L), e_memcpy[0]);
-	e_memcpy[1] = async_work_group_copy(data, global_data, (size_t)(D+L), e_memcpy[1]);
-	e_memcpy[2] = async_work_group_copy(gradient, global_gradient, (size_t)(D*L), e_memcpy[2]);
-	wait_group_events(3, e_memcpy);
+	int i, j, k;
 
-	for( i = 0; i < L; i++ )
+	event_t e_memcpy[2];
+	event_t e_memout[1];
+
+	e_memcpy[0] = async_work_group_copy(weights, global_weights, D*L, e_memcpy[0]);
+	e_memcpy[1] = async_work_group_copy(gradient, global_gradient+gid*D*L, D*L, e_memcpy[1]);
+	wait_group_events(2, e_memcpy);
+
+	for (k = gid; k < n; k += gnum) 
 	{
-		float dot = 0.;
-		//__attribute__((xcl_pipeline_loop)) 
-		for( j = 0; j < D; j++ )
+		e_memcpy[0] = async_work_group_copy(data, global_data + k*(D+L), (size_t)(D+L), e_memcpy[0]);
+		wait_group_events(1, e_memcpy);
+
+		for (i = 0; i < L; i++ ) // L: label (1, 10)
 		{
-			dot += weights[i*D+j]*data[j+L];
-		}
-		float coeff = (1./(1.+exp(-data[i]*dot ))-1.)*data[i];
-		//__attribute__((xcl_pipeline_loop)) 
-		for (j = 0; j < D; j++) 
-		{ 
-			gradient[i*D+j] += coeff*data[j+L];
+			float dot = 0.;
+
+			__attribute__((xcl_pipeline_loop)) 
+			for (j = 0; j < D; j+=2) // D: feature (10, 784 (28x28))
+			{
+				dot += weights[i*D+j+0]*data[j+L+0];
+				dot += weights[i*D+j+1]*data[j+L+1];
+			}
+
+			float coeff = (1./(1.+exp(-data[i]*dot))-1.)*data[i];
+
+			__attribute__((xcl_pipeline_loop)) 
+			for (j = 0; j < D; j++) 
+			{ 
+				gradient[i*D+j+0] += coeff*data[j+L+0];
+			}
+
 		}
 	}
-	e_memcpy[0] = async_work_group_copy(global_gradient, gradient, (size_t)(D*L), e_memcpy[0]);
-	wait_group_events(1, e_memcpy);
+	e_memout[0] = async_work_group_copy(global_gradient+gid*D*L, gradient, D*L, e_memout[0]);
+	wait_group_events(1, e_memout);
 }
