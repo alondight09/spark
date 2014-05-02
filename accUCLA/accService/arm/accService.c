@@ -382,11 +382,8 @@ int main(int argc, char** argv) {
         fclose(pFile);
 #endif
         
-<<<<<<< HEAD
 		gettimeofday(&t1, NULL);
-=======
         printf("fpga computation...\n");
->>>>>>> 5139593632292629f3926d9b9c3977f7aef9ed4a
         //computeGradient(weights,data,gradient,L,D,n);
         computeGradientByFPGA(weights,data,gradient,L,D,n,clPackage);
 		gettimeofday(&t2, NULL);
