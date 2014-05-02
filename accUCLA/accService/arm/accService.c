@@ -365,12 +365,16 @@ int main(int argc, char** argv) {
 #if SOCKET
         nbyte = recv(connfd, weights, L*D*sizeof(float), MSG_WAITALL);
         printf("received weights for %d bytes\n", nbyte);
+#if SHOW_DATA
         printf("the first 10 elements are:\n");
         for( i = 0; i < 10; i++ ) printf("%f\n", weights[i]);
+#endif
         nbyte = recv(connfd, data, n*(D+L)*sizeof(float), MSG_WAITALL);
         printf("received training data for %d bytes\n", nbyte);
+#if SHOW_DATA
         printf("the first 10 elements are:\n");
         for( i = 0; i < 10; i++ ) printf("%f\n", data[i]);
+#endif
 #else
         for( i = 0; i < D; i++ ) weights[i]=0.;
         FILE* pFile = fopen("data.txt","r");
@@ -378,7 +382,11 @@ int main(int argc, char** argv) {
         fclose(pFile);
 #endif
         
+<<<<<<< HEAD
 		gettimeofday(&t1, NULL);
+=======
+        printf("fpga computation...\n");
+>>>>>>> 5139593632292629f3926d9b9c3977f7aef9ed4a
         //computeGradient(weights,data,gradient,L,D,n);
         computeGradientByFPGA(weights,data,gradient,L,D,n,clPackage);
 		gettimeofday(&t2, NULL);
