@@ -7,10 +7,8 @@ datanode_dir=/scratch/shared/hdfs_data/datanode
 slave_list= \
 computer0 \
 computer1 \
-computer4 \
-computer5 \
-computer6 \
-computer7 
+computer2 \
+computer3 
 
 data_list= \
 ../benchmark/logistic/data
