@@ -1,5 +1,5 @@
 
-#define FPGA_DEVICE
+//#define FPGA_DEVICE
 #define SOCKET 1
 
 #include <stdio.h>
@@ -17,6 +17,12 @@
 #ifndef FPGA_DEVICE
 #include "logistic_cl.h"
 #endif
+
+#define GROUP_SIZE		32
+#define CHUNK_SIZE 		256
+
+#define LABEL_SIZE		10
+#define FEATURE_SIZE	784
 
 int load_file_to_memory(const char *filename, char **result) { 
 
@@ -83,24 +89,37 @@ void computeGradientByFPGA(float* weights, float* data, float* gradient, int L, 
 	cl_mem d_data = clPackage.d_data;
     cl_int status;
 
+
+	float* gradient_local = (float*)malloc(L*D*GROUP_SIZE*sizeof(float));
+	memset(gradient_local, 0.f, L*D*GROUP_SIZE*sizeof(float));
+
 	status = clSetKernelArg(clKernel, 0, sizeof(int), (void *)&L);
 	status |= clSetKernelArg(clKernel, 1, sizeof(int), (void *)&D);
-	status |= clSetKernelArg(clKernel, 2, sizeof(cl_mem), (void *)&d_weights);
-	status |= clSetKernelArg(clKernel, 3, sizeof(cl_mem), (void *)&d_data);
-	status |= clSetKernelArg(clKernel, 4, sizeof(cl_mem), (void *)&d_gradient);
+	status |= clSetKernelArg(clKernel, 3, sizeof(cl_mem), (void *)&d_weights);
+	status |= clSetKernelArg(clKernel, 4, sizeof(cl_mem), (void *)&d_data);
+	status |= clSetKernelArg(clKernel, 5, sizeof(cl_mem), (void *)&d_gradient);
 
 	if (status != CL_SUCCESS)
 		printf("clSetKernelArg error(%d)\n", status);
 
-    size_t work_size[1]={1};
+    size_t work_size[1]={GROUP_SIZE};
     size_t group_size[1]={1};
 
     int k;
-    status = clEnqueueWriteBuffer(clCommandQue, d_gradient, CL_FALSE, 0, L*D*sizeof(float), gradient, 0, NULL, NULL);
+	int n_chk;
+    status = clEnqueueWriteBuffer(clCommandQue, d_gradient, CL_FALSE, 0, L*D*GROUP_SIZE*sizeof(float), gradient_local, 0, NULL, NULL);
     status = clEnqueueWriteBuffer(clCommandQue, d_weights, CL_FALSE, 0, L*D*sizeof(float), weights, 0, NULL, NULL);
-    for( k = 0; k < n; k++ )
+
+    for( k = 0; k < n; k += CHUNK_SIZE ) // n: data samples (500)
     {
-        status = clEnqueueWriteBuffer(clCommandQue, d_data, CL_FALSE, 0, (D+L)*sizeof(float), data+k*(D+L), 0, NULL, NULL);
+		if (k+CHUNK_SIZE < n)
+			n_chk = CHUNK_SIZE;
+		else 
+			n_chk = n - k;
+
+		status = clSetKernelArg(clKernel, 2, sizeof(int), (void *)&n_chk);
+
+        status = clEnqueueWriteBuffer(clCommandQue, d_data, CL_TRUE, 0, (D+L)*n_chk*sizeof(float), data+k*(D+L), 0, NULL, NULL);
 
         status = clEnqueueNDRangeKernel(clCommandQue, clKernel, 1, NULL, work_size, group_size, 0, NULL, NULL);
 
@@ -108,10 +127,17 @@ void computeGradientByFPGA(float* weights, float* data, float* gradient, int L, 
             printf("clEnqueueNDRangeKernel error(%d)\n", status);
 
     }
-    status = clEnqueueReadBuffer(clCommandQue, d_gradient, CL_TRUE, 0, L*D*sizeof(float), gradient, 0, NULL, NULL);
+    status = clEnqueueReadBuffer(clCommandQue, d_gradient, CL_TRUE, 0, L*D*GROUP_SIZE*sizeof(float), gradient_local, 0, NULL, NULL);
     if (status != CL_SUCCESS)
         printf("clEnqueueReadBuffer error(%d)\n", status);
 
+	int gid = 0;
+	for (gid = 0; gid < GROUP_SIZE; gid++) {
+		for (k = 0; k < L*D; k++) {
+			gradient[k] += gradient_local[gid*L*D + k];
+		}
+	}
+	free(gradient_local);
 }
 
 struct cl_package initFPGA( const char* xclbin, const char* kernel_name )
@@ -216,15 +242,16 @@ struct cl_package initFPGA( const char* xclbin, const char* kernel_name )
 	if (status != CL_SUCCESS)
 		printf("clCreateKernel error(%d)\n", status);
 
-	cl_mem d_gradient = clCreateBuffer(context, CL_MEM_READ_WRITE, 8192*sizeof(float), NULL, &status);
+	// TODO: parameterize the size of buffers
+	cl_mem d_gradient = clCreateBuffer(context, CL_MEM_READ_WRITE, FEATURE_SIZE*LABEL_SIZE*GROUP_SIZE*sizeof(float), NULL, &status);
 	if (status != CL_SUCCESS)
 		printf("d_gradient clCreateBuffer error(%d)\n", status);
 
-	cl_mem d_weights = clCreateBuffer(context, CL_MEM_READ_ONLY, 8192*sizeof(float), NULL, &status);
+	cl_mem d_weights = clCreateBuffer(context, CL_MEM_READ_ONLY, FEATURE_SIZE*LABEL_SIZE*sizeof(float), NULL, &status);
 	if (status != CL_SUCCESS)
 		printf("d_weights clCreateBuffer error(%d)\n", status);
 
-	cl_mem d_data = clCreateBuffer(context, CL_MEM_READ_ONLY, 1024*sizeof(float), NULL, &status);
+	cl_mem d_data = clCreateBuffer(context, CL_MEM_READ_ONLY, (FEATURE_SIZE+LABEL_SIZE)*CHUNK_SIZE*sizeof(float), NULL, &status);
 	if (status != CL_SUCCESS)
 		printf("d_data clCreateBuffer error(%d)\n", status);
 
@@ -286,6 +313,8 @@ int acceptSocket( int listenfd )
 
 int main(int argc, char** argv) {
 
+    struct	timeval t1, t2, tr;
+
 #if SOCKET
     int listenfd = setupSocket( 5000 );
 #endif
@@ -310,9 +339,12 @@ int main(int argc, char** argv) {
         nbyte = recv(connfd, &D, sizeof(D), MSG_WAITALL);
         nbyte = recv(connfd, &n, sizeof(n), MSG_WAITALL);
 #else
-        L = 1;
-        D = 10;
-        n = 2;
+        L = LABEL_SIZE;
+        D = FEATURE_SIZE;
+		if (argc > 1)
+			n = atoi(argv[1]);
+		else
+			n = 100;
 #endif
 
         printf("# of labels: %d\n", L);
@@ -341,27 +373,33 @@ int main(int argc, char** argv) {
         for( i = 0; i < 10; i++ ) printf("%f\n", data[i]);
 #else
         for( i = 0; i < D; i++ ) weights[i]=0.;
-        FILE* pFile = fopen("lr_simple.txt","r");
+        FILE* pFile = fopen("data.txt","r");
         for( i = 0; i < n*(D+L); i++ ) fscanf(pFile, "%f", data+i);
         fclose(pFile);
 #endif
         
+		gettimeofday(&t1, NULL);
         //computeGradient(weights,data,gradient,L,D,n);
         computeGradientByFPGA(weights,data,gradient,L,D,n,clPackage);
+		gettimeofday(&t2, NULL);
+		timersub(&t1, &t2, &tr);
+		printf("finish in %.4f sec\n", fabs(tr.tv_sec+(double)tr.tv_usec/1000000.0));
 
 #if SOCKET
         //for( int i = 0; i < 10; i++ ) gradient[i]=i;
         nbyte = send(connfd, gradient, L*D*sizeof(float), 0);
         printf("sent gradient for %d bytes\n", nbyte);
 #else
-        for( i = 0; i < L*D; i++ ) printf("%f\n",gradient[i]);
+        for( i = 0; i < 10; i++ ) printf("%f\n",gradient[i]);
 #endif
 
         free(weights);
         free(data);
         free(gradient);
 
+#if SOCKET
         close(connfd);
+#endif
     }
 
 	clReleaseMemObject(clPackage.d_weights);

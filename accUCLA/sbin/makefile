@@ -1,24 +1,36 @@
-#!/bin/sh
-
 export TARGET=logistic
 PWD=${CURDIR}
 
-compile_service:
+HOSTS=hostlist
+host_list=$(shell cat $(HOSTS))
+
+accService=../accService/arm/accService_host/pkg/arm/zc706/bin/accService_host.exe 
+accKernel=../accKernel/${TARGET}/${TARGET}_lpp/pkg/arm/zc706/bin/${TARGET}_lpp.xclbin
+
+$(accService):
 	make -C ../accService/arm
 
-compile_fpga:
+$(accKernel):
 	make -C ../accKernel/${TARGET}
 
-setup:
-	for id in 4 5 ; do \
-		ssh computer$$id 'cd ${PWD}; scp ../accService/arm/accService_host/pkg/arm/zc706/bin/accService_host.exe root@fpga:/mnt/acc'; \
-		ssh computer$$id 'cd ${PWD}; scp ../accKernel/${TARGET}/${TARGET}_lpp/pkg/arm/zc706/bin/${TARGET}_lpp.xclbin root@fpga:/mnt/acc'; \
-		#ssh computer$$id 'cd ${PWD}; scp start.sh root@fpga:/mnt/acc'; \
-		#ssh computer$$id 'cd ${PWD}; scp stop.sh root@fpga:/mnt/acc'; \
+setup: $(accService) $(accKernel)
+	for computer in $(host_list); do \
+		echo processing $$computer; \
+		ssh $$computer ssh root@fpga cp /mnt/embedded_root/platform.xml /mnt/acc; \
+		ssh $$computer 'scp ${PWD}/$(accService) root@fpga:/mnt/acc'; \
+		ssh $$computer 'scp ${PWD}/$(accKernel) root@fpga:/mnt/acc'; \
+		ssh $$computer 'scp ${PWD}/*.sh root@fpga:/mnt/acc'; \
 	done
 
-start:
-	for id in 4 5 ; do \
-		ssh computer$$id 'ssh root@fpga "cd /mnt/acc; sh stop.sh accService"'; \
-		ssh computer$$id 'ssh root@fpga "cd /mnt/acc; sh start.sh accService"'& \
+start: $(accService) $(accKernel)
+	for computer in $(host_list) ; do \
+		echo "processing $$computer"; \
+		ssh $$computer 'ssh root@fpga "cd /mnt/acc; sh stop.sh accService"'; \
+		ssh $$computer 'ssh root@fpga "cd /mnt/acc; sh start.sh accService"'& \
+	done
+
+stop:
+	for computer in $(host_list) ; do \
+		echo "processing $$computer"; \
+		ssh $$computer 'ssh root@fpga "cd /mnt/acc; sh stop.sh accService"'; \
 	done
