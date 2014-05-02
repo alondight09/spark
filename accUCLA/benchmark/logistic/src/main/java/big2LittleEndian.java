@@ -25,7 +25,7 @@ public class big2LittleEndian{
       return floatBytes;
     }
 
-    public static byte[] FloatArray(Float[] f, int len) {
+    public static byte[] floatArray(float[] f, int len) {
       byte floatBytes[] = new byte[4*len];
       for (int i = 0; i < len; i++) {
         int floatBits = Float.floatToIntBits(f[i]);
@@ -48,12 +48,12 @@ public class big2LittleEndian{
       return intBytes;
     }
 
-    public static byte[] FloatArray(Float[][] f, int len1, int len2) {
-      Float[] a = new Float[len1*len2];
+    public static byte[] floatArray(float[][] f, int len1, int len2) {
+      float[] a = new float[len1*len2];
       for (int i = 0; i < len1; i++)
       {
           System.arraycopy(f[i],0,a,i*len2,len2);
       }
-      return FloatArray(a, len1*len2);
+      return floatArray(a, len1*len2);
     }
 }

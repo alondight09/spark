@@ -23,10 +23,10 @@ public class Connector2FPGA {
     private final int port;
     private Boolean is_connected;
 
-    public Connector2FPGA(String ip_to_bind, int port_to_bind)
+    public Connector2FPGA(String ip, int port)
     {
-        ip = ip_to_bind;
-        port = port_to_bind;
+        this.ip = ip;
+        this.port = port;
     }
     public void buildConnection( ) throws IOException
     {
@@ -42,14 +42,14 @@ public class Connector2FPGA {
         o2.writeInt(big2LittleEndian.Int(i));
         o2.flush();
     }
-    public void send( Float[] float_array, int len ) throws IOException
+    public void send( float[] float_array, int len ) throws IOException
     {
-        o2.write(big2LittleEndian.FloatArray(float_array, len));
+        o2.write(big2LittleEndian.floatArray(float_array, len));
         o2.flush();
     }
-    public void send( Float[][] float_array, int len1, int len2 ) throws IOException
+    public void send( float[][] float_array, int len1, int len2 ) throws IOException
     {
-        o2.write(big2LittleEndian.FloatArray(float_array, len1, len2));
+        o2.write(big2LittleEndian.floatArray(float_array, len1, len2));
         o2.flush();
     }
     public void send( int[] int_array, int len ) throws IOException
@@ -73,22 +73,22 @@ public class Connector2FPGA {
         }
         return result;
     }
-    public Float[] receive_float( int len ) throws IOException
+    public float[] receive_float( int len ) throws IOException
     {
         byte[] byte_array = new byte[len*4];
         in.readFully(byte_array);
         ByteBuffer buf2 = ByteBuffer.wrap(byte_array).order(ByteOrder.LITTLE_ENDIAN);
-        Float[] result = new Float[len];
+        float[] result = new float[len];
         for(int i = 0; i < len; i++)
         {
             result[i] = buf2.getFloat(i*4);
         }
         return result;
     }
-    public Float[][] receive_float( int len1, int len2 ) throws IOException
+    public float[][] receive_float( int len1, int len2 ) throws IOException
     {
-        Float[][] result = new Float[len1][len2];
-        Float[] data = receive_float( len1 * len2 );
+        float[][] result = new float[len1][len2];
+        float[] data = receive_float( len1 * len2 );
         for( int i = 0; i < len1; i++ )
         {
                 System.arraycopy(data,i*len2,result[i],0,len2);

@@ -115,9 +115,9 @@ public final class JavaHdfsLR {
 
     // Initialize w to a random value
     double[] w = new double[D];
-    for (int i = 0; i < D; i++) {
-      w[i] = 2 * rand.nextDouble() - 1;
-    }
+    //for (int i = 0; i < D; i++) {
+    //  w[i] = 2 * rand.nextDouble() - 1;
+    //}
 
     System.out.print("Initial w: ");
     printWeights(w);

@@ -26,7 +26,7 @@ void pckt_to_adp(int pckt[1], AccDonePckt & adp) {
 }
 void arpn_to_pckt(AccRspns & arpn, int pckt[3]) {
 	pckt[0] = arpn.acc_type;
-	pckt[1] = arpn.use_acc?1:0;
+	pckt[1] = arpn.use_acc;
 	pckt[2] = arpn.wait_time;
 }
 
@@ -270,6 +270,7 @@ void AccManager::run() {
 				}
 				// send back response
 				send_acc_request_response(ar, arpn);
+                cout << "; socketfd: " << ar.sockfd;
 				cout << "; use_acc: " << arpn.use_acc << "; wait_time: " << arpn.wait_time << endl;
 			}
 		}

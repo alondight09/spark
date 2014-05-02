@@ -268,7 +268,7 @@ public final class SocketLR {
         System.getenv("SPARK_HOME"), "target/simple-project-1.0.jar");
     JavaRDD<String> lines = sc.textFile(args[1]);
     //JavaRDD<String> lines = sc.textFile("lr_data.txt");
-    JavaRDD<DataPoint> points = lines.map(new ParsePoint()).cache();
+    JavaRDD<DataPoint> points = lines.map(new ParsePoint()).repartition(32).cache();
     int ITERATIONS = Integer.parseInt(args[2]);
 
     // Initialize w to a random value
@@ -285,7 +285,7 @@ public final class SocketLR {
     for (int k = 1; k <= ITERATIONS; k++) {
       System.out.println("On iteration " + k);
 
-      float[][] gradient = points.repartition(100).mapPartitions(
+      float[][] gradient = points.mapPartitions(
         new ComputeGradient(w)
       ).reduce(new VectorSum());
 

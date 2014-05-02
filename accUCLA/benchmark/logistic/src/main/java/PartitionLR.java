@@ -21,20 +21,23 @@ import org.apache.spark.api.java.function.Function;
 import org.apache.spark.api.java.function.Function2;
 import org.apache.spark.api.java.function.FlatMapFunction;
 
+import org.apache.commons.lang.ArrayUtils;
+import java.lang.InterruptedException;
+import java.io.IOException;
 import java.io.Serializable;
 import java.util.*;
 import java.util.regex.Pattern;
+import java.lang.System;
 
+import accUCLA.api.BackwardKernel;
 /**
  * Logistic regression based classification.
  */
 public final class PartitionLR {
 
-  private static final int D = 10;   // Number of dimensions
-  private static final int L = 1;   // Number of labels
-  //private static final int D = 784;   // Number of dimensions
-  //private static final int L = 10;   // Number of labels
-  private static final Random rand = new Random(42);
+  private static int D = 784;   // Number of dimensions
+  private static int L = 10;   // Number of labels
+  private static int useFPGA = 1;
 
   static class DataPoint implements Serializable {
     DataPoint(float[] x, float[] y) {
@@ -77,66 +80,49 @@ public final class PartitionLR {
     }
   }
 
-  static class TestPrediction extends FlatMapFunction<Iterator<DataPoint>, Integer> {
+  static class ForwardLR extends FlatMapFunction<Iterator<DataPoint>, float[]> {
     private final float[][] weights;
 
-    TestPrediction(float[][] weights) {
+    ForwardLR(float[][] weights) {
         this.weights = weights;
     }
 
     @Override
-    public Iterable<Integer> call(Iterator<DataPoint> p_iter) {
-        List<Integer> result = new ArrayList<Integer>();
-        int prediction = 0;
+    public Iterable<float[]> call(Iterator<DataPoint> p_iter) {
+        List<float[]> result = new ArrayList<float[]>();
         while(p_iter.hasNext())
         {
             DataPoint p = p_iter.next();
-            float max_possibility = Float.MIN_VALUE;
-            int likely_class = 0;
+            float[] prediction = new float[L];
             for(int i = 0; i < L; i++) {
                 float dot = dot(weights[i], p.x);
-                if(dot > max_possibility)
-                {
-                    max_possibility = dot;
-                    likely_class = i;
-                }
+                prediction[i] = 1 / ( 1 + (float)(Math.exp(-dot)) );
             }
-            if( L <= 1 )
-            {
-                prediction += p.y[0] > 0 ?  ( max_possibility > 0 ? 1 : 0 ) : ( max_possibility < 0 ? 1 : 0 );
-            }
-            else
-            {
-                prediction += ( p.y[likely_class] > 0 ? 1 : 0 );
-            }
+            result.add(prediction);
         }
-        result.add(prediction);
         return result;
     }
   }
 
-  static class ComputeGradient extends FlatMapFunction<Iterator<DataPoint>, float[][]> {
+  static class BackwardLR extends FlatMapFunction<Iterator<DataPoint>, float[][]> {
     private final float[][] weights;
 
-    ComputeGradient(float[][] weights) {
+    BackwardLR(float[][] weights) {
       this.weights = weights;
     }
 
     @Override
-    public Iterable<float[][]> call(Iterator<DataPoint> p_iter) {
+    public Iterable<float[][]> call(Iterator<DataPoint> p_iter) throws IOException, InterruptedException {
       List<float[][]> result = new ArrayList<float[][]>();
-      float[][] gradient = new float[L][D];
-      while(p_iter.hasNext())
-      {
+      int partition_size = 0;
+      List<float[]> data = new ArrayList<float[]>();
+      while (p_iter.hasNext()) {
+          partition_size ++;
           DataPoint p = p_iter.next();
-          for (int i = 0; i < L; i++) {
-              float dot = dot(weights[i], p.x);
-              for (int j = 0; j < D; j++) {
-                gradient[i][j] += (1 / (1 + (float)(Math.exp(-p.y[i] * dot))) - 1) * p.y[i] * p.x[j];
-              }
-          }
+          data.add(ArrayUtils.addAll(p.y,p.x));
       }
-      result.add(gradient);
+      result.add(BackwardKernel.run(useFPGA,L,D,partition_size,weights,data.toArray(new float[0][L+D])));
+
       return result;
     }
   }
@@ -157,23 +143,28 @@ public final class PartitionLR {
 
   public static void main(String[] args) {
 
-    if (args.length < 3) {
-      System.err.println("Usage: JavaHdfsLR <master> <file> <iters> (<testing file>)");
+    if (args.length < 6) {
+      System.err.println("Usage: JavaHdfsLR <master> <file> <iters> <L> <D> <use FPGA?> (<testing file>)");
       System.exit(1);
     }
+    int ITERATIONS = Integer.parseInt(args[2]);
+    System.out.println("iterations: "+ITERATIONS);
+    L = Integer.parseInt(args[3]);
+    System.out.println("L: "+L);
+    D = Integer.parseInt(args[4]);
+    System.out.println("D: "+D);
+    useFPGA = Integer.parseInt(args[5]);
+    System.out.println("use FPGA: "+useFPGA);
 
     JavaSparkContext sc = new JavaSparkContext(args[0], "PartitionLR",
         System.getenv("SPARK_HOME"), "target/simple-project-1.0.jar");
     JavaRDD<String> lines = sc.textFile(args[1]);
-    //JavaRDD<String> lines = sc.textFile("lr_data.txt");
-    JavaRDD<DataPoint> points = lines.map(new ParsePoint()).cache();
-    int ITERATIONS = Integer.parseInt(args[2]);
+    JavaRDD<DataPoint> points = lines.map(new ParsePoint()).repartition(32).cache();
 
-    // Initialize w to a random value
     float[][] w = new float[L][D];
     for (int i = 0; i < L; i++) {
         for (int j = 0; j < D; j++) {
-          w[i][j] = 2 * rand.nextFloat() - 1;
+          w[i][j] = 0.0f;
         }
     }
 
@@ -183,9 +174,12 @@ public final class PartitionLR {
     for (int k = 1; k <= ITERATIONS; k++) {
       System.out.println("On iteration " + k);
 
+      long tic = System.nanoTime( );
       float[][] gradient = points.mapPartitions(
-        new ComputeGradient(w)
+        new BackwardLR(w)
       ).reduce(new VectorSum());
+      System.out.println("elapsed time: " + (System.nanoTime()-tic)/1e9);
+
 
       for (int i = 0; i < L; i++) {
         for (int j = 0; j < D; j++) {
@@ -198,15 +192,9 @@ public final class PartitionLR {
     System.out.print("Final w: ");
     printWeights(w);
 
-    lines = sc.textFile( args.length < 4 ? args[1] : args[3] );
-    points = lines.map(new ParsePoint());
-    float error_rate = points.mapPartitions( new TestPrediction(w) ).reduce( new Function2<Integer, Integer, Integer>() {
-      @Override
-      public Integer call(Integer integer, Integer integer2) {
-        return integer + integer2;
-      }
-    }) / (float)( points.count() );
-    System.out.println("error rate: "+(error_rate*100)+"%");
+    lines = sc.textFile( args.length < 7 ? args[1] : args[6] );
+    System.out.println("first prediction");
+    System.out.println(Arrays.toString(lines.map(new ParsePoint()).repartition(32).mapPartitions( new ForwardLR(w) ).first( )));
 
     System.exit(0);
   }
