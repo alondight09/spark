@@ -10,7 +10,7 @@ import java.io.PrintWriter;
 import java.io.PrintStream;
 
 public class BackwardKernel {
-    private static final Boolean use_acc_manager = true;
+    private static final Boolean use_acc_manager = false;
 
     public static float[][] run(int useFPGA, int L, int D, int partition_size, float[][] weights, float[][] data) throws IOException, InterruptedException {
         //debug

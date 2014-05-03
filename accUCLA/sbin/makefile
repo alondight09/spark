@@ -4,9 +4,7 @@ namenode_dir=${HADOOP_HOME}/hdfs_data/namenode
 datanode_dir=/scratch/shared/hdfs_data/datanode
 slave_list= \
 computer0 \
-computer1 \
-computer2 \
-computer3 
+computer1 
 
 data_list= \
 ../benchmark/logistic/data
