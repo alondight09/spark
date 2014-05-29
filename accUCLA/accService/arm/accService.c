@@ -17,8 +17,8 @@
 #include "logistic_cl.h"
 #endif
 
-#define GROUP_SIZE		32
-#define CHUNK_SIZE 		256
+#define GROUP_SIZE		8
+#define CHUNK_SIZE 		512
 
 #define LABEL_SIZE		10
 #define FEATURE_SIZE	784
@@ -143,11 +143,16 @@ void computeGradientByFPGA(float* weights, float* data, float* gradient, int L, 
 	float* gradient_local = (float*)malloc(L*D*GROUP_SIZE*sizeof(float));
 	memset(gradient_local, 0.f, L*D*GROUP_SIZE*sizeof(float));
 
+    /*
 	status = clSetKernelArg(clKernel, 0, sizeof(int), (void *)&L);
 	status |= clSetKernelArg(clKernel, 1, sizeof(int), (void *)&D);
 	status |= clSetKernelArg(clKernel, 3, sizeof(cl_mem), (void *)&d_weights);
 	status |= clSetKernelArg(clKernel, 4, sizeof(cl_mem), (void *)&d_data);
 	status |= clSetKernelArg(clKernel, 5, sizeof(cl_mem), (void *)&d_gradient);
+    */
+	status = clSetKernelArg(clKernel, 1, sizeof(cl_mem), (void *)&d_weights);
+	status |= clSetKernelArg(clKernel, 2, sizeof(cl_mem), (void *)&d_data);
+	status |= clSetKernelArg(clKernel, 3, sizeof(cl_mem), (void *)&d_gradient);
 
 	if (status != CL_SUCCESS)
 		printf("clSetKernelArg error(%d)\n", status);
@@ -160,7 +165,7 @@ void computeGradientByFPGA(float* weights, float* data, float* gradient, int L, 
     status = clEnqueueWriteBuffer(clCommandQue, d_gradient, CL_FALSE, 0, L*D*GROUP_SIZE*sizeof(float), gradient_local, 0, NULL, NULL);
     status = clEnqueueWriteBuffer(clCommandQue, d_weights, CL_FALSE, 0, L*D*sizeof(float), weights, 0, NULL, NULL);
 
-    printf("kernel prepared\n");
+    printf("kernel prepared --- ");
     toc( timer1 );
 
     for( k = 0; k < n; k += CHUNK_SIZE ) // n: data samples (500)
@@ -170,7 +175,9 @@ void computeGradientByFPGA(float* weights, float* data, float* gradient, int L, 
 		else 
 			n_chk = n - k;
 
-		status = clSetKernelArg(clKernel, 2, sizeof(int), (void *)&n_chk);
+        int reps = n_chk/GROUP_SIZE;
+        status = clSetKernelArg(clKernel, 0, sizeof(int), (void *)&reps);
+		//status = clSetKernelArg(clKernel, 2, sizeof(int), (void *)&n_chk);
 
         status = clEnqueueWriteBuffer(clCommandQue, d_data, CL_TRUE, 0, (D+L)*n_chk*sizeof(float), data+k*(D+L), 0, NULL, NULL);
 
@@ -182,7 +189,7 @@ void computeGradientByFPGA(float* weights, float* data, float* gradient, int L, 
     }
     status = clEnqueueReadBuffer(clCommandQue, d_gradient, CL_TRUE, 0, L*D*GROUP_SIZE*sizeof(float), gradient_local, 0, NULL, NULL);
 
-    printf("kernel done\n");
+    printf("kernel done --- ");
     toc( timer1 );
 
     if (status != CL_SUCCESS)
@@ -195,7 +202,7 @@ void computeGradientByFPGA(float* weights, float* data, float* gradient, int L, 
 		}
 	}
     
-    printf("CPU reduction done\n");
+    printf("CPU reduction done --- ");
     toc( timer1 );
 
 	free(gradient_local);
@@ -387,6 +394,7 @@ int recv_large_array( int connfd, char* data, size_t nbyte_exp )
 
 int main(int argc, char** argv) {
 
+    printf("************* Welcome to UCLA FPGA agent! **********\n");
 #if SOCKET
     int listenfd = setupSocket( 5000 );
 #endif
@@ -403,7 +411,7 @@ int main(int argc, char** argv) {
 #if SOCKET
         int connfd = acceptSocket(listenfd);
 #endif
-
+        printf("************* Got a new task! *************\n");
         //fread(A, n*n, sizeof(float), fin);
         //fread(B, n*n, sizeof(float), fin);
         size_t nbyte;
@@ -417,6 +425,7 @@ int main(int argc, char** argv) {
         nbyte = recv(connfd, &D, sizeof(D), MSG_WAITALL);
         nbyte = recv(connfd, &n, sizeof(n), MSG_WAITALL);
         nbyte = recv(connfd, &cached, sizeof(cached), MSG_WAITALL);
+        printf("parameter recieved --- ");
         toc( timer1 );
 #else
         L = LABEL_SIZE;
@@ -441,7 +450,7 @@ int main(int argc, char** argv) {
         int i;
 #if SOCKET
         nbyte = recv_large_array(connfd, (char*)weights, L*D*sizeof(float));
-        printf("received weights for %d bytes\n", nbyte);
+        printf("received weights for %d bytes --- ", nbyte);
         toc( timer1 );
 #if SHOW_DATA
         printf("the first 10 elements are:\n");
@@ -451,7 +460,7 @@ int main(int argc, char** argv) {
         {
             //nbyte = recv(connfd, data, n*(D+L)*sizeof(float), MSG_WAITALL);
             nbyte = recv_large_array( connfd, (char*)data, n*(D+L)*sizeof(float) );
-            printf("received training data for %d bytes\n", nbyte);
+            printf("received training data for %d bytes --- ", nbyte);
             toc( timer1 );
         }
 #if SHOW_DATA
@@ -465,9 +474,10 @@ int main(int argc, char** argv) {
         fclose(pFile);
 #endif
         
-        printf("fpga computation...\n");
+        printf("FPGA computation...\n");
         //computeGradient(weights,data,gradient,L,D,n);
         computeGradientByFPGA(weights,data,gradient,L,D,n,clPackage);
+        printf("FPGA computation finished! --- ");
         toc( timer1 );
 
 #if SOCKET
@@ -475,8 +485,9 @@ int main(int argc, char** argv) {
         nbyte = send(connfd, gradient, L*D*sizeof(float), 0);
         //int temp = tr.tv_usec;
         //nbyte = send(connfd, &temp, sizeof(int), 0);
-        printf("sent gradient for %d bytes\n", nbyte);
+        printf("sent gradient for %d bytes --- ", nbyte);
         toc( timer1 );
+        printf("************* Task finished! *************\n");
 #else
         for( i = 0; i < 10; i++ ) printf("%f\n",gradient[i]);
 #endif
