@@ -1,12 +1,11 @@
 
-//#define FPGA_DEVICE
+#define FPGA_DEVICE
 #define SOCKET 1
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
-#include <sys/time.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -23,6 +22,55 @@
 
 #define LABEL_SIZE		10
 #define FEATURE_SIZE	784
+#define PARTITION_SIZE	20000
+
+#include <sys/time.h>
+#include <time.h>
+
+typedef struct timespec timespec;
+timespec diff(timespec start, timespec end)
+{   
+  timespec temp;
+  if ((end.tv_nsec-start.tv_nsec)<0) {
+    temp.tv_sec = end.tv_sec-start.tv_sec-1;
+    temp.tv_nsec = 1000000000+end.tv_nsec-start.tv_nsec;
+  } else {
+    temp.tv_sec = end.tv_sec-start.tv_sec;
+    temp.tv_nsec = end.tv_nsec-start.tv_nsec;
+  }
+  return temp;
+}
+
+timespec sum(timespec t1, timespec t2) {
+  timespec temp;
+  if (t1.tv_nsec + t2.tv_nsec >= 1000000000) {
+    temp.tv_sec = t1.tv_sec + t2.tv_sec + 1;
+    temp.tv_nsec = t1.tv_nsec + t2.tv_nsec - 1000000000;
+  } else {
+    temp.tv_sec = t1.tv_sec + t2.tv_sec;
+    temp.tv_nsec = t1.tv_nsec + t2.tv_nsec;
+  }
+  return temp;
+}
+
+void printTimeSpec(timespec t) {
+  printf("elapsed time: %d.%09d\n", (int)t.tv_sec, (int)t.tv_nsec);
+}
+
+timespec tic( )
+{
+    timespec start_time;
+    clock_gettime(CLOCK_REALTIME, &start_time);
+    return start_time;
+}
+
+void toc( timespec& start_time )
+{
+    timespec current_time;
+    clock_gettime(CLOCK_REALTIME, &current_time);
+    printTimeSpec( diff( start_time, current_time ) );
+    start_time = current_time;
+}
 
 int load_file_to_memory(const char *filename, char **result) { 
 
@@ -89,6 +137,8 @@ void computeGradientByFPGA(float* weights, float* data, float* gradient, int L, 
 	cl_mem d_data = clPackage.d_data;
     cl_int status;
 
+    printf("kernel starts\n");
+    timespec timer1 = tic( );
 
 	float* gradient_local = (float*)malloc(L*D*GROUP_SIZE*sizeof(float));
 	memset(gradient_local, 0.f, L*D*GROUP_SIZE*sizeof(float));
@@ -110,6 +160,9 @@ void computeGradientByFPGA(float* weights, float* data, float* gradient, int L, 
     status = clEnqueueWriteBuffer(clCommandQue, d_gradient, CL_FALSE, 0, L*D*GROUP_SIZE*sizeof(float), gradient_local, 0, NULL, NULL);
     status = clEnqueueWriteBuffer(clCommandQue, d_weights, CL_FALSE, 0, L*D*sizeof(float), weights, 0, NULL, NULL);
 
+    printf("kernel prepared\n");
+    toc( timer1 );
+
     for( k = 0; k < n; k += CHUNK_SIZE ) // n: data samples (500)
     {
 		if (k+CHUNK_SIZE < n)
@@ -128,6 +181,10 @@ void computeGradientByFPGA(float* weights, float* data, float* gradient, int L, 
 
     }
     status = clEnqueueReadBuffer(clCommandQue, d_gradient, CL_TRUE, 0, L*D*GROUP_SIZE*sizeof(float), gradient_local, 0, NULL, NULL);
+
+    printf("kernel done\n");
+    toc( timer1 );
+
     if (status != CL_SUCCESS)
         printf("clEnqueueReadBuffer error(%d)\n", status);
 
@@ -137,6 +194,10 @@ void computeGradientByFPGA(float* weights, float* data, float* gradient, int L, 
 			gradient[k] += gradient_local[gid*L*D + k];
 		}
 	}
+    
+    printf("CPU reduction done\n");
+    toc( timer1 );
+
 	free(gradient_local);
 }
 
@@ -271,16 +332,16 @@ int setupSocket( int port )
 	// socket 
 	int err = 0;
 	int listenfd = 0;
-	socklen_t buf_size = 0;
+	socklen_t buf_size = 32*1024*1024;
 	socklen_t size = sizeof(buf_size);
 	struct sockaddr_in serv_addr; 
 
 	listenfd = socket(AF_INET, SOCK_STREAM, 0);
 
+	err = setsockopt(listenfd, SOL_SOCKET, SO_SNDBUF, &buf_size, sizeof(buf_size));
+	err = setsockopt(listenfd, SOL_SOCKET, SO_RCVBUF, &buf_size, sizeof(buf_size));
 	err = getsockopt(listenfd, SOL_SOCKET, SO_SNDBUF, &buf_size, &size);
-	//err = setsockopt(listenfd, SOL_SOCKET, SO_SNDBUF, &buf_size, sizeof(buf_size));
-	//err = setsockopt(listenfd, SOL_SOCKET, SO_RCVBUF, &buf_size, sizeof(buf_size));
-	//printf("socket send buffer size: %d\n", buf_size);
+	printf("socket send buffer size: %d\n", buf_size);
 
 	memset(&serv_addr, '0', sizeof(serv_addr));
 	
@@ -311,14 +372,29 @@ int acceptSocket( int listenfd )
     return connfd;
 }
 
-int main(int argc, char** argv) {
+int recv_large_array( int connfd, char* data, size_t nbyte_exp )
+{
+    size_t nbyte = 0;
+	size_t packet_size = 256*1024;
+    unsigned int start;
+    for( start = 0; start < nbyte_exp; start += packet_size )
+    {
+        if( start + packet_size > nbyte_exp ) packet_size = nbyte_exp - start;
+        nbyte += recv(connfd, data + start, packet_size, MSG_WAITALL);
+    }
+    return nbyte;
+}
 
-    struct	timeval t1, t2, tr;
+int main(int argc, char** argv) {
 
 #if SOCKET
     int listenfd = setupSocket( 5000 );
 #endif
     struct cl_package clPackage = initFPGA("logistic_lpp.xclbin", "logistic");
+
+    float* weights = (float*)malloc(LABEL_SIZE*FEATURE_SIZE*sizeof(float));
+    float* data = (float*)malloc(PARTITION_SIZE*(FEATURE_SIZE+LABEL_SIZE)*sizeof(float));
+    float* gradient = (float*)malloc(LABEL_SIZE*FEATURE_SIZE*sizeof(float));
 
 #if SOCKET
     while (1) 
@@ -334,10 +410,14 @@ int main(int argc, char** argv) {
         int L;
         int D;
         int n;
+        int cached;
 #if SOCKET
+        timespec timer1 = tic( );
         nbyte = recv(connfd, &L, sizeof(L), MSG_WAITALL);
         nbyte = recv(connfd, &D, sizeof(D), MSG_WAITALL);
         nbyte = recv(connfd, &n, sizeof(n), MSG_WAITALL);
+        nbyte = recv(connfd, &cached, sizeof(cached), MSG_WAITALL);
+        toc( timer1 );
 #else
         L = LABEL_SIZE;
         D = FEATURE_SIZE;
@@ -356,57 +436,60 @@ int main(int argc, char** argv) {
             printf("ERROR: too large data size!\n");
             return 1;
         }
-        float* weights = (float*)malloc(L*D*sizeof(float));
-        float* data = (float*)malloc(n*(D+L)*sizeof(float));
-        float* gradient = (float*)malloc(L*D*sizeof(float));
         memset((void*)gradient, 0, L*D*sizeof(float));
 
         int i;
 #if SOCKET
-        nbyte = recv(connfd, weights, L*D*sizeof(float), MSG_WAITALL);
+        nbyte = recv_large_array(connfd, (char*)weights, L*D*sizeof(float));
         printf("received weights for %d bytes\n", nbyte);
+        toc( timer1 );
 #if SHOW_DATA
         printf("the first 10 elements are:\n");
         for( i = 0; i < 10; i++ ) printf("%f\n", weights[i]);
 #endif
-        nbyte = recv(connfd, data, n*(D+L)*sizeof(float), MSG_WAITALL);
-        printf("received training data for %d bytes\n", nbyte);
+        if( cached == 0 )
+        {
+            //nbyte = recv(connfd, data, n*(D+L)*sizeof(float), MSG_WAITALL);
+            nbyte = recv_large_array( connfd, (char*)data, n*(D+L)*sizeof(float) );
+            printf("received training data for %d bytes\n", nbyte);
+            toc( timer1 );
+        }
 #if SHOW_DATA
         printf("the first 10 elements are:\n");
         for( i = 0; i < 10; i++ ) printf("%f\n", data[i]);
 #endif
 #else
         for( i = 0; i < D; i++ ) weights[i]=0.;
-        FILE* pFile = fopen("data.txt","r");
+        FILE* pFile = fopen("train_data.txt","r");
         for( i = 0; i < n*(D+L); i++ ) fscanf(pFile, "%f", data+i);
         fclose(pFile);
 #endif
         
-		gettimeofday(&t1, NULL);
         printf("fpga computation...\n");
         //computeGradient(weights,data,gradient,L,D,n);
         computeGradientByFPGA(weights,data,gradient,L,D,n,clPackage);
-		gettimeofday(&t2, NULL);
-		timersub(&t1, &t2, &tr);
-		printf("finish in %.4f sec\n", fabs(tr.tv_sec+(double)tr.tv_usec/1000000.0));
+        toc( timer1 );
 
 #if SOCKET
         //for( int i = 0; i < 10; i++ ) gradient[i]=i;
         nbyte = send(connfd, gradient, L*D*sizeof(float), 0);
+        //int temp = tr.tv_usec;
+        //nbyte = send(connfd, &temp, sizeof(int), 0);
         printf("sent gradient for %d bytes\n", nbyte);
+        toc( timer1 );
 #else
         for( i = 0; i < 10; i++ ) printf("%f\n",gradient[i]);
 #endif
 
-        free(weights);
-        free(data);
-        free(gradient);
 
 #if SOCKET
         close(connfd);
 #endif
     }
 
+    free(weights);
+    free(data);
+    free(gradient);
 	clReleaseMemObject(clPackage.d_weights);
 	clReleaseMemObject(clPackage.d_data);
 	clReleaseMemObject(clPackage.d_gradient);
